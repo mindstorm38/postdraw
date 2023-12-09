@@ -1,0 +1,142 @@
+//! This is a little command line utility to post process drawing scans.
+
+use clap::{command, arg, value_parser, Command, ArgMatches};
+use std::path::PathBuf;
+use glam::Vec2;
+
+
+fn main() -> anyhow::Result<()> {
+    
+    let mut matches = command!()
+        .subcommand_required(true)
+        .disable_help_subcommand(true)
+        .disable_version_flag(true)
+        .subcommand(Command::new("bw")
+            .arg(arg!(<PATH> "Path of image to post process")
+                .id("in_path")
+                .value_parser(value_parser!(PathBuf)))
+            .arg(arg!(-o --output <PATH> "Path of output image")
+                .id("out_path")
+                .value_parser(value_parser!(PathBuf)))
+            .arg(arg!(--threshold <THRESHOLD> "Gray threshold, pixels above this are forced white, pixels below or equal are compressed to black")
+                .value_parser(value_parser!(u8))
+                .default_value("150"))
+            .arg(arg!(--compress <FACTOR> "Compress factor to apply linearly to pixels below or equal to threshold")
+                .value_parser(value_parser!(f32))
+                .default_value("0.4"))
+            .arg(arg!(--base <BASE> "Base gray color for all black pixels after compression")
+                .value_parser(value_parser!(u8))
+                .default_value("20")))
+        .subcommand(Command::new("halftone")
+            .arg(arg!(<PATH> "Path of image to post process")
+                .id("in_path")
+                .value_parser(value_parser!(PathBuf)))
+            .arg(arg!(-o --output <PATH> "Path of output image")
+                .id("out_path")
+                .value_parser(value_parser!(PathBuf)))
+            .arg(arg!(--threshold <THRESHOLD> "Gray threshold, pixels above this are transparent, pixels below are transformed in halftone")
+                .value_parser(value_parser!(u8))
+                .default_value("150"))
+            .arg(arg!(--size <SIZE> "Distance between two halftone dots")
+                .value_parser(value_parser!(f32))
+                .default_value("6.0"))
+            .arg(arg!(--base <BASE> "Base gray color for all pixels, halftone only applies to alpha channel")
+                .value_parser(value_parser!(u8))
+                .default_value("40")))
+        .get_matches();
+
+    let (sub, sub_matches) = matches.remove_subcommand().unwrap();
+    match &sub[..] {
+        "bw" => bw(sub_matches),
+        "halftone" => halftone(sub_matches),
+        _ => unreachable!()
+    }
+
+}
+
+fn bw(mut matches: ArgMatches) -> anyhow::Result<()> {
+
+    let in_path = matches.remove_one::<PathBuf>("in_path").unwrap();
+    let out_path = matches.remove_one::<PathBuf>("out_path").unwrap_or_else(|| {
+        in_path.with_extension("bw.png")
+    });
+
+    let threshold = matches.remove_one::<u8>("threshold").unwrap();
+    let threshold_f32 = threshold as f32;
+    let compress = matches.remove_one::<f32>("compress").unwrap();
+    let base = matches.remove_one::<u8>("base").unwrap();
+
+    println!("Opening image...");
+    println!("  Path: {in_path:?}");
+    let mut image = image::open(&in_path)?.to_luma8();
+    println!("  Size: {}x{}", image.width(), image.height());
+    
+    println!("Processing image...");
+    println!("  Threshold: {threshold}");
+    println!("  Compress: {compress}");
+    println!("  Base: {base}");
+    for pixel in image.pixels_mut() {
+        if pixel[0] <= threshold {
+            pixel[0] = ((pixel[0] as f32 / threshold_f32 * compress * threshold_f32) as u8).saturating_add(base);
+        } else {
+            pixel[0] = 255;
+        }
+    }
+
+    println!("Saving image");
+    println!("  Path: {out_path:?}");
+    image.save(&out_path)?;
+
+    Ok(())
+    
+}
+
+fn halftone(mut matches: ArgMatches) -> anyhow::Result<()> {
+
+    let in_path = matches.remove_one::<PathBuf>("in_path").unwrap();
+    let out_path = matches.remove_one::<PathBuf>("out_path").unwrap_or_else(|| {
+        in_path.with_extension("halftone.png")
+    });
+    
+    let threshold = matches.remove_one::<u8>("threshold").unwrap();
+    let size = matches.remove_one::<f32>("size").unwrap();
+    let base = matches.remove_one::<u8>("base").unwrap();
+
+    println!("Opening image...");
+    println!("  Path: {in_path:?}");
+    let mut image = image::open(&in_path)?.to_luma_alpha8();
+    println!("  Size: {}x{}", image.width(), image.height());
+
+    println!("Processing image...");
+    println!("  Threshold: {threshold}");
+    println!("  Base: {base}");
+
+    let angle = Vec2::from_angle(std::f32::consts::FRAC_PI_4);
+
+    for (x, y, pixel) in image.enumerate_pixels_mut() {
+        
+        if pixel[0] <= threshold {
+
+            let pos = angle.rotate(Vec2::new(x as f32, y as f32));
+            let index = (pos / size).floor();
+            let delta_pos = pos - index * size;
+            let delta = delta_pos / size * 2.0 - 1.0;
+            let dist_squared = delta.length_squared() * 1.3;
+            
+            pixel[1] = ((1.0 - dist_squared) * 255.0) as u8;
+
+        } else {
+            pixel[1] = 0;
+        }
+
+        pixel[0] = base;
+
+    }
+
+    println!("Saving image");
+    println!("  Path: {out_path:?}");
+    image.save(&out_path)?;
+
+    Ok(())
+
+}
