@@ -117,7 +117,7 @@ fn halftone(mut matches: ArgMatches) -> anyhow::Result<()> {
 
     for (x, y, pixel) in image.enumerate_pixels_mut() {
         
-        if pixel[0] <= threshold {
+        if pixel[1] != 0 && pixel[0] <= threshold {
 
             let pos = angle.rotate(Vec2::new(x as f32, y as f32));
             let index = (pos / size).floor();
