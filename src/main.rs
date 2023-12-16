@@ -39,9 +39,12 @@ fn main() -> anyhow::Result<()> {
             .arg(arg!(--threshold <THRESHOLD> "Gray threshold, pixels above this are transparent, pixels below are transformed in halftone")
                 .value_parser(value_parser!(u8))
                 .default_value("150"))
-            .arg(arg!(--size <SIZE> "Distance between two halftone dots")
+            .arg(arg!(--stride <STRIDE> "Distance between two halftone dots")
                 .value_parser(value_parser!(f32))
                 .default_value("6.0"))
+            .arg(arg!(--radius <RADIUS> "Radius of the circle")
+                .value_parser(value_parser!(f32))
+                .default_value("1.0"))
             .arg(arg!(--base <BASE> "Base gray color for all pixels, halftone only applies to alpha channel")
                 .value_parser(value_parser!(u8))
                 .default_value("40")))
@@ -58,15 +61,15 @@ fn main() -> anyhow::Result<()> {
 
 fn bw(mut matches: ArgMatches) -> anyhow::Result<()> {
 
-    let in_path = matches.remove_one::<PathBuf>("in_path").unwrap();
-    let out_path = matches.remove_one::<PathBuf>("out_path").unwrap_or_else(|| {
-        in_path.with_extension("bw.png")
-    });
-
     let threshold = matches.remove_one::<u8>("threshold").unwrap();
     let threshold_f32 = threshold as f32;
     let compress = matches.remove_one::<f32>("compress").unwrap();
     let base = matches.remove_one::<u8>("base").unwrap();
+
+    let in_path = matches.remove_one::<PathBuf>("in_path").unwrap();
+    let out_path = matches.remove_one::<PathBuf>("out_path").unwrap_or_else(|| {
+        in_path.with_extension("bw.png")
+    });
 
     println!("Opening image...");
     println!("  Path: {in_path:?}");
@@ -94,15 +97,16 @@ fn bw(mut matches: ArgMatches) -> anyhow::Result<()> {
 }
 
 fn halftone(mut matches: ArgMatches) -> anyhow::Result<()> {
+    
+    let threshold = matches.remove_one::<u8>("threshold").unwrap();
+    let stride = matches.remove_one::<f32>("stride").unwrap();
+    let radius = matches.remove_one::<f32>("radius").unwrap();
+    let base = matches.remove_one::<u8>("base").unwrap();
 
     let in_path = matches.remove_one::<PathBuf>("in_path").unwrap();
     let out_path = matches.remove_one::<PathBuf>("out_path").unwrap_or_else(|| {
-        in_path.with_extension("halftone.png")
+        in_path.with_extension(format!("halftone_{stride}_{radius}_{base}.png"))
     });
-    
-    let threshold = matches.remove_one::<u8>("threshold").unwrap();
-    let size = matches.remove_one::<f32>("size").unwrap();
-    let base = matches.remove_one::<u8>("base").unwrap();
 
     println!("Opening image...");
     println!("  Path: {in_path:?}");
@@ -111,21 +115,25 @@ fn halftone(mut matches: ArgMatches) -> anyhow::Result<()> {
 
     println!("Processing image...");
     println!("  Threshold: {threshold}");
+    println!("  Stride: {stride}");
+    println!("  Radius: {radius}");
     println!("  Base: {base}");
 
     let angle = Vec2::from_angle(std::f32::consts::FRAC_PI_4);
+    let radius_squared = radius.powi(2);
 
     for (x, y, pixel) in image.enumerate_pixels_mut() {
         
         if pixel[1] != 0 && pixel[0] <= threshold {
 
             let pos = angle.rotate(Vec2::new(x as f32, y as f32));
-            let index = (pos / size).floor();
-            let delta_pos = pos - index * size;
-            let delta = delta_pos / size * 2.0 - 1.0;
-            let dist_squared = delta.length_squared() * 1.3;
+            let index = (pos / stride).floor();
+            let delta_pos = pos - index * stride;
+            let delta = delta_pos / stride * 2.0 - 1.0;
+            let dist_squared = delta.length_squared();
+            let alpha = (radius_squared - dist_squared).clamp(0.0, 1.0);
             
-            pixel[1] = ((1.0 - dist_squared) * 255.0) as u8;
+            pixel[1] = (alpha * 255.0) as u8;
 
         } else {
             pixel[1] = 0;
