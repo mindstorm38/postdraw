@@ -44,7 +44,7 @@ fn main() -> anyhow::Result<()> {
                 .default_value("6.0"))
             .arg(arg!(--radius <RADIUS> "Radius of the circle")
                 .value_parser(value_parser!(f32))
-                .default_value("1.0"))
+                .default_value("0.4"))
             .arg(arg!(--base <BASE> "Base gray color for all pixels, halftone only applies to alpha channel")
                 .value_parser(value_parser!(u8))
                 .default_value("40")))
@@ -120,12 +120,15 @@ fn halftone(mut matches: ArgMatches) -> anyhow::Result<()> {
     println!("  Base: {base}");
 
     let angle = Vec2::from_angle(std::f32::consts::FRAC_PI_4);
-    let radius_squared = radius.powi(2);
+    // let radius_squared = radius.powi(2);
 
     for (x, y, pixel) in image.enumerate_pixels_mut() {
         
         if pixel[1] != 0 && pixel[0] <= threshold {
 
+            let radius = radius + (1.0 - pixel[0] as f32 / 255.0);
+            let radius_squared = radius.powi(2);
+            
             let pos = angle.rotate(Vec2::new(x as f32, y as f32));
             let index = (pos / stride).floor();
             let delta_pos = pos - index * stride;
